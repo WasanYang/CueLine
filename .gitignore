@@ -19,3 +19,6 @@ sheet*.txt
 Thumbs.db
 .vscode/
 .idea/
+
+# Third-party cue/click samples: licensed for our own use only, no redistribution
+cues/

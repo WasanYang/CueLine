@@ -23,6 +23,7 @@ from .library import Library
 from .pipeline import fetch, run_analysis
 
 STATIC = Path(__file__).parent / "static"
+CUES = Path(__file__).parent.parent / "cues"  # user-supplied samples, git-ignored
 AUDIO_EXT = {".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg", ".aif", ".aiff"}
 
 
@@ -53,7 +54,7 @@ class LyricsIn(BaseModel):
     text: str = Field(max_length=50_000)
 
 
-def create_app(library_dir: Path) -> FastAPI:
+def create_app(library_dir: Path, cues_dir: Path = CUES) -> FastAPI:
     lib = Library(library_dir)
     jobs: dict[str, Job] = {}
     work: "queue.Queue[tuple[Job, str, Path | None]]" = queue.Queue()
@@ -248,6 +249,15 @@ def create_app(library_dir: Path) -> FastAPI:
     def list_jobs():
         return sorted((asdict(j) for j in jobs.values()), key=lambda j: j["created"], reverse=True)
 
+    @app.get("/api/cues")
+    def cues():
+        """Cue/click samples the user put in the cues folder (not shipped with the app)."""
+        if not cues_dir.is_dir():
+            return []
+        return sorted(p.stem for p in cues_dir.iterdir() if p.suffix.lower() in (".wav", ".mp3"))
+
+    if cues_dir.is_dir():
+        app.mount("/cues", StaticFiles(directory=cues_dir), name="cues")
     app.mount("/", StaticFiles(directory=STATIC, html=True), name="static")
     return app
 

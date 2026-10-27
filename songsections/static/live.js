@@ -21,7 +21,20 @@ const fmt = (t) => {
   return `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, "0")}`;
 };
 
-let ctx = null, songGain, clickGain;
+let ctx = null, songGain, clickGain, guideGain;
+// Samples from the local cues/ folder (git-ignored; see README). name -> AudioBuffer
+const cues = { buf: {}, click: {} };
+
+// Section base name (lowercase, no spaces/dashes) -> cue sample name.
+const CUE_MAP = {
+  intro: "intro", verse: "verse", v: "verse", prechorus: "prechorus", pre: "prechorus",
+  chorus: "chorus", c: "chorus", hook: "chorus", "ฮุก": "chorus", "ฮุค": "chorus",
+  bridge: "bridge", b: "bridge", solo: "solo",
+  instrumental: "instrumental", inst: "instrumental", interlude: "instrumental",
+  midtro: "turn", turn: "turn", turnaround: "turn",
+  break: "break", breakdown: "break", outro: "outro", end: "end", ending: "end",
+  tag: "tag", keychange: "keychange", acapella: "acapella", band: "band", riff: "riff",
+};
 const song = { id: null, data: null, buffer: null, sections: [], grid: [], bars: [], meter: 4, duration: 0 };
 const play = {
   playing: false,
@@ -29,6 +42,8 @@ const play = {
   anchors: [], // {ctx, pos}
   sources: [], // {src, gain, start, end}
   clicks: [], // {node, t}
+  cueNodes: [], // {node, t}
+  cueKey: "", // boundary the guide cues were scheduled for
   schedCtx: 0,
   pending: null, // {ctx, idx, src, prev, loop}
   countInUntil: 0,
@@ -41,8 +56,10 @@ function audio() {
     ctx = new AudioContext({ latencyHint: "interactive" });
     songGain = ctx.createGain();
     clickGain = ctx.createGain();
+    guideGain = ctx.createGain();
     songGain.connect(ctx.destination);
     clickGain.connect(ctx.destination);
+    guideGain.connect(ctx.destination);
     applyMix();
   }
   return ctx;
@@ -96,6 +113,15 @@ function makeSource(pos, when) {
 
 function scheduleClick(t, down) {
   const kind = $("#click-sound").value;
+  const sample = cues.click[kind]?.[down ? "down" : "up"];
+  if (sample) {
+    const src = ctx.createBufferSource();
+    src.buffer = sample;
+    src.connect(clickGain);
+    src.start(t);
+    play.clicks.push({ node: src, t });
+    return;
+  }
   const osc = ctx.createOscillator();
   const env = ctx.createGain();
   if (kind === "wood") {
@@ -115,6 +141,96 @@ function scheduleClick(t, down) {
   play.clicks.push({ node: osc, t });
 }
 
+function playCue(buf, t, until = null) {
+  const src = ctx.createBufferSource();
+  src.buffer = buf;
+  src.connect(guideGain);
+  src.start(t);
+  if (until !== null && until < t + buf.duration) src.stop(until);
+  play.cueNodes.push({ node: src, t });
+}
+
+function cancelCuesFrom(t) {
+  play.cueNodes = play.cueNodes.filter((c) => {
+    if (c.t >= t - 1e-4) { try { c.node.stop(); } catch {} return false; }
+    return true;
+  });
+}
+
+/** What to say in the bar before a section: [{buf, beat}] (beat 0 = first beat), or tts text. */
+function cuePlan(name) {
+  const m = name.trim().match(/^(.*?)\s*(\d+)?$/);
+  const base = m[1].toLowerCase().replace(/[\s_-]/g, "");
+  const key = CUE_MAP[base];
+  const plan = { items: [], tts: null };
+  if (key && cues.buf[key]) plan.items.push({ buf: cues.buf[key], beat: 0, word: true });
+  else plan.tts = name;
+  if (song.meter >= 4) {
+    // "Verse 2": the number follows the word; other sections are called without one.
+    if (key === "verse" && m[2] && cues.buf[m[2]]) plan.items.push({ buf: cues.buf[m[2]], beat: 1 });
+    // Count the last two beats into the new section ("3, 4").
+    for (const k of [song.meter - 1, song.meter]) {
+      if (cues.buf[String(k)]) plan.items.push({ buf: cues.buf[String(k)], beat: k - 1 });
+    }
+  }
+  return plan;
+}
+
+/** Schedule the spoken cues for the next section change, once it is within a bar. */
+function scheduleGuide(t, horizon) {
+  const up = upcoming();
+  const key = up && !up.loop && up.ctx !== null ? `${up.idx}@${up.ctx.toFixed(3)}` : "";
+  if (play.cueKey && play.cueKey !== key) {
+    // The target changed (jump queued or cancelled, loop switched on): drop cues not yet heard.
+    cancelCuesFrom(t + 0.005);
+    play.cueKey = "";
+  }
+  if (!key || play.cueKey === key) return;
+  // Beats of the bar before the change, taken from the beat grid when the change is
+  // on a beat (it is, except for "jump now"); otherwise from the local beat length.
+  const a = anchorAt(up.ctx - 1e-3);
+  const boundaryPos = a.pos + (up.ctx - a.ctx);
+  const gi = lowerBound(song.grid, boundaryPos - 0.02);
+  const onGrid = gi >= song.meter && Math.abs(song.grid[gi] - boundaryPos) < 0.02;
+  const bl = beatLen(boundaryPos - 0.01);
+  const beatAt = (b) => onGrid
+    ? a.ctx + song.grid[gi - song.meter + b] - a.pos
+    : up.ctx - (song.meter - b) * bl;
+  const barStart = beatAt(0);
+  if (barStart - 0.5 > horizon) return;
+  play.cueKey = key;
+  const plan = cuePlan(song.sections[up.idx].name);
+  const soon = t + 0.01;
+
+  // 1) The count ("3, 4") is rhythmic: always exactly on its beat, cut at the next beat.
+  const counts = plan.items.filter((it) => !it.word && it.beat >= song.meter - 2);
+  for (const it of counts) {
+    const at = beatAt(it.beat);
+    if (at >= soon) playCue(it.buf, at, beatAt(it.beat + 1));
+  }
+  // 2) The section name (and verse number) must finish before the count starts.
+  const limit = (counts.length ? beatAt(counts[0].beat) : up.ctx) - 0.03;
+  const word = plan.items.find((it) => it.word);
+  const num = plan.items.find((it) => !it.word && it.beat < song.meter - 2);
+  if (word) {
+    // On beat 1 if it fits; at fast tempos start a little earlier so "Verse 2" ends before the count.
+    const needed = word.buf.duration + (num ? 0.02 + num.buf.duration : 0);
+    const at = Math.max(soon, Math.min(beatAt(0), limit - needed));
+    if (at + word.buf.duration <= limit + 0.05) {
+      playCue(word.buf, at);
+      if (num) {
+        // On beat 2 when there is room, otherwise right after the word.
+        const nAt = Math.max(at + word.buf.duration + 0.02, Math.min(beatAt(num.beat), limit - num.buf.duration));
+        if (nAt + num.buf.duration <= limit + 0.02) playCue(num.buf, nAt);
+      }
+    }
+  }
+  if (plan.tts) {
+    const wait = Math.max(0, barStart - t);
+    setTimeout(() => { if (play.playing && play.cueKey === key) speak(plan.tts); }, wait * 1000);
+  }
+}
+
 function cancelClicksFrom(t) {
   play.clicks = play.clicks.filter((c) => {
     if (c.t >= t - 1e-4) { try { c.node.stop(); } catch {} return false; }
@@ -132,7 +248,11 @@ async function start(pos = play.pausedPos) {
   let begin = t0;
   if ($("#opt-countin").checked) {
     const bl = beatLen(pos);
-    for (let k = 0; k < song.meter; k++) scheduleClick(t0 + k * bl, k === 0);
+    for (let k = 0; k < song.meter; k++) {
+      scheduleClick(t0 + k * bl, k === 0);
+      // Spoken count-in "1, 2, 3, 4" when the number samples are available.
+      if (cues.buf[String(k + 1)]) playCue(cues.buf[String(k + 1)], t0 + k * bl, t0 + (k + 1) * bl);
+    }
     begin = t0 + song.meter * bl;
   }
   play.countInUntil = begin;
@@ -153,8 +273,9 @@ function stop() {
   const p = now();
   for (const s of play.sources) { try { s.src.stop(); } catch {} s.gain.disconnect(); }
   cancelClicksFrom(0);
+  cancelCuesFrom(0);
   clearInterval(play.timer);
-  Object.assign(play, { playing: false, sources: [], anchors: [], pending: null });
+  Object.assign(play, { playing: false, sources: [], anchors: [], pending: null, cueKey: "" });
   play.pausedPos = Math.max(0, Math.min(p, song.duration));
   speechSynthesis.cancel();
   document.body.classList.remove("playing");
@@ -243,8 +364,11 @@ function tick() {
     play.schedCtx = end;
   }
 
+  scheduleGuide(t, horizon);
+
   // Housekeeping: drop finished sources/clicks and old anchors.
   play.clicks = play.clicks.filter((c) => c.t > t - 0.2);
+  play.cueNodes = play.cueNodes.filter((c) => c.t > t - 2);
   play.sources = play.sources.filter((s) => {
     if (s.end !== null && s.end < t - 0.1) { try { s.src.stop(); } catch {} s.gain.disconnect(); return false; }
     return true;
@@ -383,15 +507,6 @@ function render() {
     const b = document.createElement("b");
     b.textContent = up.loop ? `⟳ ${name}` : name;
     next.append(b, when);
-    // Spoken cue one bar ahead of the change.
-    if (up.ctx !== null && play.playing && !up.loop) {
-      const key = `${up.idx}@${up.ctx.toFixed(2)}`;
-      const lead = up.ctx - t;
-      if (play.spoken !== key && lead <= beatLen(p) * song.meter + 0.05 && lead > 0) {
-        play.spoken = key;
-        speak(name);
-      }
-    }
   }
 }
 
@@ -408,6 +523,7 @@ function applyMix() {
   if (!ctx) return;
   const on = (id) => $(id).classList.contains("on");
   clickGain.gain.value = on("#mute-click") ? Number($("#vol-click").value) : 0;
+  guideGain.gain.value = on("#mute-guide") ? Number($("#vol-guide").value) : 0;
   songGain.gain.value = on("#mute-song") ? Number($("#vol-song").value) : 0;
 }
 
@@ -515,8 +631,8 @@ $("#strip").onclick = (e) => {
   scheduleJump(bar, Math.max(ctx.currentTime + 0.03, play.countInUntil), sectionAt(bar));
 };
 for (const id of ["#mute-click", "#mute-guide", "#mute-song"]) $(id).onclick = (e) => toggleMute(e.currentTarget);
-for (const id of ["#vol-click", "#vol-song"]) $(id).oninput = () => { applyMix(); savePrefs(); };
-for (const id of ["#vol-guide", "#click-sound", "#opt-jump", "#opt-countin"]) $(id).onchange = savePrefs;
+for (const id of ["#vol-click", "#vol-song", "#vol-guide"]) $(id).oninput = () => { applyMix(); savePrefs(); };
+for (const id of ["#click-sound", "#opt-jump", "#opt-countin"]) $(id).onchange = savePrefs;
 $("#opt-loop").onchange = () => {
   if (!$("#opt-loop").checked && play.pending?.loop) cancelPending();
   render();
@@ -532,6 +648,45 @@ document.addEventListener("keydown", (e) => {
   else if (e.key === "ArrowLeft") { e.preventDefault(); jumpTo(Math.max(sectionAt(now()) - 1, 0)); }
 });
 
+/** Load samples from the local cues/ folder; without them the app falls back to synth/TTS. */
+async function loadCues() {
+  let names = [];
+  try { names = await (await fetch("/api/cues")).json(); } catch {}
+  const decode = async (name) => audio().decodeAudioData(await (await fetch(`/cues/${encodeURIComponent(name)}.wav`)).arrayBuffer());
+  await Promise.all(names.filter((n) => !n.startsWith("click-")).map(async (n) => {
+    try { cues.buf[n] = await decode(n); } catch {}
+  }));
+  // One-bar click loops (4 quarter notes): slice out the accented first beat and a normal beat.
+  for (const kind of ["hard", "soft"]) {
+    if (!names.includes(`click-${kind}`)) continue;
+    try {
+      const bar = await decode(`click-${kind}`);
+      const beat = bar.duration / 4;
+      const slice = (from) => {
+        const len = Math.floor(Math.min(beat, 0.15) * bar.sampleRate);
+        const out = ctx.createBuffer(bar.numberOfChannels, len, bar.sampleRate);
+        const off = Math.floor(from * bar.sampleRate);
+        for (let ch = 0; ch < bar.numberOfChannels; ch++) {
+          out.copyToChannel(bar.getChannelData(ch).subarray(off, off + len), ch);
+        }
+        return out;
+      };
+      cues.click[`wt-${kind}`] = { down: slice(0), up: slice(beat) };
+      const opt = document.createElement("option");
+      opt.value = `wt-${kind}`;
+      opt.textContent = kind === "hard" ? "WT Hard" : "WT Soft (เบา)";
+      $("#click-sound").append(opt);
+    } catch {}
+  }
+  const words = Object.keys(cues.buf).filter((n) => !/^\d$/.test(n)).length;
+  $("#guide-info").textContent = words
+    ? `เสียงคิวจากโฟลเดอร์ cues (${words} คำ) · นับ 3, 4 ก่อนเข้าท่อน`
+    : "ไม่มีไฟล์ในโฟลเดอร์ cues: ใช้เสียงอ่านของ browser";
+}
+
+window.cueLine = { play, song, cues }; // for debugging from the browser console
+
+await loadCues();
 loadPrefs();
 const songs = await loadSongs();
 const wanted = location.hash.slice(1);
