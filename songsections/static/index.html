@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SongSections</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+  <link rel="stylesheet" href="app.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span class="brand-mark"></span>SongSections</div>
+    <form id="job-form" class="job-form" autocomplete="off">
+      <input id="url" name="url" type="url" placeholder="วางลิงก์ YouTube ที่นี่" aria-label="ลิงก์ YouTube">
+      <label class="btn ghost file-btn" title="เลือกไฟล์เพลงในเครื่อง">
+        <input id="file" name="file" type="file" accept="audio/*,.mp3,.wav,.m4a,.flac,.aif,.aiff">
+        <span id="file-label">หรือเลือกไฟล์</span>
+      </label>
+      <select id="engine" name="engine" aria-label="ตัววิเคราะห์">
+        <option value="auto">ตัววิเคราะห์: อัตโนมัติ</option>
+        <option value="allin1">allin1 (AI)</option>
+        <option value="librosa">librosa (เร็ว)</option>
+      </select>
+      <button class="btn primary" type="submit">วิเคราะห์</button>
+    </form>
+  </header>
+
+  <div class="layout">
+    <aside class="sidebar">
+      <section id="jobs-panel" hidden>
+        <h2>กำลังทำงาน</h2>
+        <ul id="jobs" class="jobs"></ul>
+      </section>
+      <section>
+        <h2>เพลงของฉัน</h2>
+        <ul id="songs" class="songs"></ul>
+        <p id="songs-empty" class="muted small" hidden>ยังไม่มีเพลง ลองวางลิงก์ YouTube ด้านบน</p>
+      </section>
+    </aside>
+
+    <main id="main">
+      <div id="empty" class="empty">
+        <div class="empty-art" aria-hidden="true">
+          <span style="--w:18%;--c:var(--g0)"></span><span style="--w:30%;--c:var(--g1)"></span><span style="--w:30%;--c:var(--g2)"></span><span style="--w:22%;--c:var(--g1)"></span>
+        </div>
+        <h1>หาท่อนเพลง แล้วส่งเข้า Logic Pro</h1>
+        <p class="muted">วางลิงก์ YouTube หรือเลือกไฟล์เพลง ระบบจะหา Intro, Verse, Chorus และท่อนอื่น ๆ ให้ ตรวจและแก้ได้ที่นี่ แล้ว export เป็นไฟล์ .mid ที่มี marker</p>
+      </div>
+
+      <div id="song" hidden>
+        <div class="song-head">
+          <div class="song-title">
+            <h1 id="title"></h1>
+            <div id="meta" class="meta"></div>
+          </div>
+          <div class="actions">
+            <a id="btn-live" class="btn" href="live.html" title="ปุ่มท่อนเพลง + click สำหรับเล่นสด">▶ โหมดเล่นสด</a>
+            <button id="btn-merge" class="btn ghost" title="รวมท่อนชื่อเดียวกันที่อยู่ติดกัน">รวมท่อนซ้ำ</button>
+            <button id="btn-reset" class="btn ghost" title="กลับไปใช้ผลวิเคราะห์ตั้งต้น">รีเซ็ต</button>
+            <button id="btn-save" class="btn" disabled>บันทึก</button>
+            <div class="split-btn">
+              <button id="btn-export" class="btn primary">Export .mid</button>
+              <select id="tempo-mode" aria-label="Tempo ใน MIDI" title="Tempo ใน MIDI">
+                <option value="beats">tempo ตามเพลง</option>
+                <option value="constant">tempo คงที่</option>
+              </select>
+            </div>
+            <details class="more">
+              <summary class="btn ghost" aria-label="เพิ่มเติม">⋯</summary>
+              <div class="menu">
+                <a id="btn-audio" href="#">ดาวน์โหลดไฟล์เพลง</a>
+                <button id="btn-delete" class="danger">ลบเพลงนี้</button>
+              </div>
+            </details>
+          </div>
+        </div>
+
+        <div class="transport">
+          <button id="btn-play" class="btn round" aria-label="เล่น/หยุด">
+            <svg class="i-play" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+            <svg class="i-pause" viewBox="0 0 24 24"><path d="M7 5h4v14H7zM13 5h4v14h-4z"/></svg>
+          </button>
+          <div class="clock"><span id="clock-time">0:00.0</span><span id="clock-bar" class="muted"></span></div>
+          <div id="now-section" class="now-section"></div>
+          <div class="spacer"></div>
+          <button id="btn-split" class="btn ghost" title="ตัดท่อนตรงตำแหน่งที่เล่นอยู่ (ปุ่ม S)">✂ ตัดท่อนตรงนี้</button>
+          <label class="ctl">สแนป
+            <select id="snap">
+              <option value="bar">ห้อง</option>
+              <option value="beat">บีต</option>
+              <option value="off">ปิด</option>
+            </select>
+          </label>
+          <label class="ctl">ซูม <input id="zoom" type="range" min="0" max="200" value="0"></label>
+        </div>
+
+        <div class="wave-wrap">
+          <div id="loading-wave" class="loading-wave">กำลังโหลดคลื่นเสียง…</div>
+          <div id="waveform"></div>
+        </div>
+        <p class="hint muted small">ลากขอบแถบสีเพื่อย้ายจุดเปลี่ยนท่อน · คลิกบนคลื่นเสียงเพื่อไปตำแหน่งนั้น · Space = เล่น/หยุด · S = ตัดท่อน</p>
+
+        <div id="now-lyrics" class="now-lyrics" hidden></div>
+
+        <details id="lyrics-panel" class="lyrics-panel">
+          <summary>โครงเพลงและเนื้อร้อง</summary>
+          <div class="lyrics-body">
+            <textarea id="lyrics" spellcheck="false" aria-label="โครงเพลงและเนื้อร้อง" placeholder="[Intro]
+
+[V1]
+เนื้อร้องท่อนแรก…
+
+[Pre]
+…
+
+[Chorus x2]
+…
+
+[Bridge]
+…
+
+[Outro]"></textarea>
+            <div class="lyrics-help small">
+              <p>ใส่ชื่อท่อนในวงเล็บเหลี่ยม เช่น <code>[V1]</code> หรือแบบ chord sheet เช่น <code>Verse 1:</code> แล้วตามด้วยเนื้อร้อง ท่อนดนตรีไม่ต้องมีเนื้อร้องก็ได้</p>
+              <p class="muted">วาง chord sheet ทั้งชุดได้เลย ระบบจะตัดบรรทัดที่มีแต่คอร์ด และตัวย่อหน้าบรรทัด เช่น <code>1:</code> <code>C:</code> ออกให้ (คอร์ดให้ Chord ID ใน Logic จัดการ)</p>
+              <p class="muted">ชื่อที่ระบบรู้จัก: Intro · V / Verse · Pre / Pre-Chorus · C / Chorus / Hook / ฮุก · B / Bridge · Solo · Inst / Interlude / Midtro · Break · Outro / Ending ใส่ <b>x2</b> ต่อท้าย เช่น <code>[Chorus x2]</code> ถ้าท่อนนั้นซ้ำติดกัน ชื่ออื่นจะใช้ตามที่พิมพ์</p>
+              <p class="muted">ระบบจะเรียงท่อนตามลำดับนี้ลงบนจุดเปลี่ยนที่วิเคราะห์ได้ โดยเลือกจุดที่ชนิดท่อนตรงกันที่สุด จากนั้นลากขอบปรับต่อได้ และกด <b>บันทึก</b> เมื่อพอใจแล้ว</p>
+              <button id="btn-fit" class="btn primary">จัดท่อนตามโครงนี้</button>
+              <hr class="sep">
+              <p class="muted">ยังไม่มีเนื้อเพลง? ให้ระบบแยกเสียงร้องแล้วถอดเป็นข้อความ (ทดลอง) ผลเป็นแค่ร่าง ต้องตรวจแก้เองเสมอ เนื้อที่ได้จะใส่ลงท่อนตามเวลาที่ร้อง</p>
+              <button id="btn-transcribe" class="btn">แกะเนื้อจากเสียง</button>
+            </div>
+          </div>
+        </details>
+
+        <table class="sections">
+          <thead>
+            <tr><th></th><th>ท่อน</th><th>เริ่ม</th><th>ยาว</th><th></th></tr>
+          </thead>
+          <tbody id="rows"></tbody>
+        </table>
+        <datalist id="names">
+          <option>Intro</option><option>Verse</option><option>Pre-Chorus</option><option>Chorus</option>
+          <option>Bridge</option><option>Solo</option><option>Instrumental</option><option>Break</option><option>Outro</option>
+        </datalist>
+      </div>
+    </main>
+  </div>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script type="module" src="app.js"></script>
+</body>
+</html>

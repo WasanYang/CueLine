@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SongSections Live</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="app.css">
+  <link rel="stylesheet" href="live.css">
+</head>
+<body class="live">
+  <header class="topbar">
+    <div class="brand"><span class="brand-mark"></span>SongSections <span class="live-tag">LIVE</span></div>
+    <div class="spacer"></div>
+    <a id="to-editor" class="btn ghost" href="index.html">← หน้าแก้ไข</a>
+  </header>
+
+  <div class="layout">
+    <aside class="sidebar">
+      <section>
+        <h2>เพลง</h2>
+        <ul id="songs" class="songs"></ul>
+      </section>
+    </aside>
+
+    <main id="main">
+      <div id="empty" class="empty">
+        <h1>เลือกเพลงทางซ้าย</h1>
+        <p class="muted">โหมดเล่นสดใช้ท่อนที่บันทึกไว้ล่าสุดในหน้าแก้ไข</p>
+      </div>
+
+      <div id="stage" hidden>
+        <div class="live-head">
+          <div class="live-title">
+            <h1 id="title"></h1>
+            <div id="meta" class="meta"></div>
+          </div>
+          <div class="readout">
+            <div class="ro"><span class="lbl">บาร์</span><span id="ro-bar" class="val">1</span></div>
+            <div class="ro"><span class="lbl">บีต</span><span id="ro-beat" class="val">1</span></div>
+            <div class="ro"><span class="lbl">BPM</span><span id="ro-bpm" class="val">–</span></div>
+            <div class="ro wide"><span class="lbl">เวลา</span><span id="ro-time" class="val">0:00</span></div>
+          </div>
+        </div>
+
+        <div id="beat-lights" class="beat-lights" aria-hidden="true"></div>
+
+        <div id="strip" class="strip" title="คลิกเพื่อย้ายตำแหน่ง">
+          <div id="strip-blocks" class="strip-blocks"></div>
+          <div id="strip-head" class="strip-head"></div>
+        </div>
+
+        <div class="transport live-transport">
+          <button id="btn-play" class="btn round big" aria-label="เล่น/หยุด (Space)">
+            <svg class="i-play" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+            <svg class="i-pause" viewBox="0 0 24 24"><path d="M6 6h12v12H6z"/></svg>
+          </button>
+          <button id="btn-restart" class="btn ghost" title="กลับไปต้นท่อนปัจจุบัน">⟲ ต้นท่อน</button>
+          <div class="cue">
+            <span class="lbl">ตอนนี้</span><span id="cue-now" class="cue-now">–</span>
+            <span class="lbl">ถัดไป</span><span id="cue-next" class="cue-next">–</span>
+          </div>
+          <div class="spacer"></div>
+          <label class="toggle"><input id="opt-countin" type="checkbox" checked><span>นับ 1 ห้องก่อนเล่น</span></label>
+          <label class="toggle"><input id="opt-loop" type="checkbox"><span>วนท่อนนี้ (L)</span></label>
+          <label class="ctl">กระโดดเมื่อ
+            <select id="opt-jump">
+              <option value="bar">จบห้อง</option>
+              <option value="section">จบท่อน</option>
+              <option value="now">ทันที</option>
+            </select>
+          </label>
+        </div>
+
+        <div id="pads" class="pads"></div>
+
+        <div class="mixer">
+          <div class="ch">
+            <div class="ch-head"><span>Click</span><button id="mute-click" class="mute on" aria-pressed="true">เปิด</button></div>
+            <input id="vol-click" type="range" min="0" max="1" step="0.01" value="0.8" aria-label="ระดับเสียง click">
+            <label class="ctl small">เสียง
+              <select id="click-sound">
+                <option value="beep">บี๊ป</option>
+                <option value="wood">ไม้เคาะ</option>
+              </select>
+            </label>
+          </div>
+          <div class="ch">
+            <div class="ch-head"><span>Guide</span><button id="mute-guide" class="mute on" aria-pressed="true">เปิด</button></div>
+            <input id="vol-guide" type="range" min="0" max="1" step="0.01" value="0.9" aria-label="ระดับเสียงบอกท่อน">
+            <span class="muted small">พูดชื่อท่อนถัดไปก่อน 1 ห้อง</span>
+          </div>
+          <div class="ch">
+            <div class="ch-head"><span>เพลง</span><button id="mute-song" class="mute on" aria-pressed="true">เปิด</button></div>
+            <input id="vol-song" type="range" min="0" max="1" step="0.01" value="0.8" aria-label="ระดับเสียงเพลง">
+            <span class="muted small">ปิดได้ถ้าจะใช้แค่ click</span>
+          </div>
+        </div>
+        <p class="hint muted small">Space = เล่น/หยุด · 1–9 = กระโดดไปท่อน · L = วนท่อน · C = เปิด/ปิด click · ← → = ท่อนก่อน/ถัดไป</p>
+      </div>
+
+      <div id="loading" class="loading-overlay" hidden><span>กำลังโหลดเพลง…</span></div>
+    </main>
+  </div>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script type="module" src="live.js"></script>
+</body>
+</html>

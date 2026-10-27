@@ -1,0 +1,21 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.tmp
+
+# Songs, analysis results and lyrics (copyrighted audio/lyrics, never commit)
+library/
+output/
+sheet*.txt
+*.mp3
+*.wav
+*.m4a
+*.flac
+*.mid
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
